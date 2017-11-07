@@ -3,3 +3,4 @@
 *.txt
 data/
 log/
+sftp-config.json

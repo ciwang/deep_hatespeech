@@ -9,7 +9,7 @@ import numpy as np
 
 HATEBASE = os.path.join(os.path.dirname(__file__), '../data/hatebase/lexicon.csv')
 HATEBASE_NUM_FIELDS = 8
-hatebase_fields = {
+HATEBASE_FIELDS = {
     'about_class': np.int32, 
     'about_religion': np.int32, 
     'about_gender': np.int32,
@@ -21,14 +21,9 @@ hatebase_fields = {
     # 'number_of_sightings': np.int32
 }
 
-with open(HATEBASE,'rb') as hb:
-    hatebase_data = pd.read_csv( hb, header = 0, index_col = 0, quoting = 0, 
-                                    dtype = hatebase_fields, usecols = range(9) )
-
 def train_and_eval_auc( train_x, train_y, test_x, test_y, model=LR() ):
     model.fit( train_x, train_y )
     p = model.predict_proba( test_x )
-
     # hack
     p = p[:,1] if p.shape[1] > 1 else p[:,0]
 
@@ -37,6 +32,10 @@ def train_and_eval_auc( train_x, train_y, test_x, test_y, model=LR() ):
 
 # Returns matrix of shape (n_examples, n_features)
 def hatebase_features( raw_x, sparse=False ):
+    with open(HATEBASE,'rb') as hb:
+        hatebase_data = pd.read_csv( hb, header = 0, index_col = 0, quoting = 0, 
+                                    dtype = HATEBASE_FIELDS, usecols = range(9) )
+
     def get_feature_vec( str ):
         tokens = [w.rstrip(' ?:!,;.') for w in str.strip().split()]
         # matches = [hatebase_data[w] for w in hatebase_data if w in tokens] # gets unique tokens

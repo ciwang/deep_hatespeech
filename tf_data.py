@@ -49,13 +49,13 @@ def initialize_vocabulary(vocab_path):
     else:
         raise ValueError("Vocabulary file %s not found.", vocab_path)
 
-def process_glove( vocab, embed_path, glove_dim ):
+def process_glove( vocab, embed_path, glove_path, glove_dim ):
     GLOVE_SIZE = 1193514
 
     if not os.path.isfile(embed_path):
         #glove = np.random.randn(len(vocab), GLOVE_DIM)
         glove = np.zeros((len(vocab), glove_dim))
-        with open(GLOVE_PATH, 'r') as fh:
+        with open(glove_path, 'r') as fh:
             for line in tqdm(fh, total=GLOVE_SIZE):
                 array = line.strip().split(" ")
                 word = array[0]
@@ -64,6 +64,20 @@ def process_glove( vocab, embed_path, glove_dim ):
                     vector = list(map(float, array[1:]))
                     glove[idx, :] = vector
         pd.DataFrame(glove).to_csv(embed_path, header = False, index = False)
+
+def add_hb_embeddings( vocab, embeddings, hb_vocab_path, hb_embed_path ):
+    hb_embeddings = pd.read_csv(hb_embed_path, header = None, dtype = np.float32)
+    hb_vocab = []
+    with tf.gfile.GFile(hb_vocab_path, mode="rb") as f:
+        hb_vocab.extend(f.readlines())
+    hb_vocab = [line.strip('\n') for line in hb_vocab]
+    for i, word in enumerate(hb_vocab):
+        if word in vocab:
+            print word, "at index", vocab[word]
+            #print "old", embeddings.iloc[vocab[word], :]
+            #print "new", hb_embeddings.iloc[i, :]
+            embeddings.iloc[vocab[word], :] = hb_embeddings.iloc[i, :]
+    return embeddings
 
 def counts_to_vec( counts, embeddings ):  
     vecs = []
@@ -87,23 +101,36 @@ def vectorize_data( data_raw, data_vec_path, vectorizer, embeddings ):
 
 #
 
+USE_HB_EMBED = True
+
 if __name__ == '__main__':
     args = setup_args()
     vocab_path = pjoin(args.data_dir, "vocab.dat")
     embed_path = pjoin("data", "glove", "embeddings.%dd.dat") % args.glove_dim
+    glove_path = pjoin("data", "glove", "glove.twitter.%dd.txt") % args.glove_dim
+    hb_vocab_path = pjoin("data", "hatebase", "vocab.dat")
+    hb_embed_path = pjoin("data", "hatebase", "embeddings.hidden.%dd.dat") % args.glove_dim
 
     train_raw = pd.read_csv( pjoin(args.data_dir, "train.x"), header = 0, quoting = 0 )['tweet']
     test_raw = pd.read_csv( pjoin(args.data_dir, "test.x"), header = 0, quoting = 0 )['tweet']
     
     create_vocabulary(vocab_path, [train_raw, test_raw])
     vocab = initialize_vocabulary(vocab_path)
-    process_glove(vocab, embed_path, args.glove_dim)
+    process_glove(vocab, embed_path, glove_path, args.glove_dim)
 
-    embeddings = pd.read_csv(embed_path, header = None, dtype = np.float64)
+    embeddings = pd.read_csv(embed_path, header = None, dtype = np.float32)
+    if USE_HB_EMBED:
+        embeddings = add_hb_embeddings(vocab, embeddings, hb_vocab_path, hb_embed_path)
+
     vectorizer = CountVectorizer( analyzer = "word", tokenizer = None, preprocessor = None, 
                                     vocabulary = vocab )
     # vectorize and write data
-    train_vec_path = pjoin(args.data_dir, "train.%dd.vec" % args.glove_dim)
-    test_vec_path = pjoin(args.data_dir, "test.%dd.vec" % args.glove_dim)
+    print "Vectorizing and writing ..."
+    if USE_HB_EMBED:
+        train_vec_path = pjoin(args.data_dir, "train.withhidden.%dd.vec" % args.glove_dim)
+        test_vec_path = pjoin(args.data_dir, "test.withhidden.%dd.vec" % args.glove_dim)
+    else:
+        train_vec_path = pjoin(args.data_dir, "train.%dd.vec" % args.glove_dim)
+        test_vec_path = pjoin(args.data_dir, "test.%dd.vec" % args.glove_dim)
     vectorize_data(train_raw, train_vec_path, vectorizer, embeddings)
     vectorize_data(test_raw, test_vec_path, vectorizer, embeddings)

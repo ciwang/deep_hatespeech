@@ -1,4 +1,4 @@
-from tf_regularized_linear_models import LRClassifierL2, SoftmaxClassifier
+from tf_custom_models import LRClassifierL2, SoftmaxClassifier
 from utility import train_and_eval_auc
 
 import os
@@ -40,7 +40,7 @@ tf.app.flags.DEFINE_string("embed_path", "", "Path to the GLoVe embedding (defau
 def load_dataset(x_file, y_file):
     with open(x_file, 'rb') as x_file, open(y_file, 'rb') as y_file:
         data_x = pd.read_csv( x_file, header = None, quoting = 0, dtype = np.float32 )
-        data_y = pd.read_csv( y_file, header = 0, quoting = 0, usecols = ['hate_speech'], dtype = np.float32)
+        data_y = pd.read_csv( y_file, header = 0, quoting = 0, usecols = ['hate_speech'], dtype = np.int32)
         return data_x.values, data_y.values.ravel()
 
 def main(_):
@@ -54,16 +54,16 @@ def main(_):
     with open(pjoin(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
 
-    train_x_path = pjoin(FLAGS.data_dir, "train.%dd.vec") % FLAGS.embedding_size
+    train_x_path = pjoin(FLAGS.data_dir, "train.withhidden.%dd.vec") % FLAGS.embedding_size
     train_y_path = pjoin(FLAGS.data_dir, "train.y")
-    test_x_path = pjoin(FLAGS.data_dir, "test.%dd.vec") % FLAGS.embedding_size
+    test_x_path = pjoin(FLAGS.data_dir, "test.withhidden.%dd.vec") % FLAGS.embedding_size
     test_y_path = pjoin(FLAGS.data_dir, "test.y")
 
     train_x, train_y = load_dataset(train_x_path, train_y_path)
     test_x, test_y = load_dataset(test_x_path, test_y_path) #FLAGS.batch_size
 
-    # lr = SoftmaxClassifier()
-    lr = LRClassifierL2(C=100)
+    lr = SoftmaxClassifier()
+    #lr = LRClassifierL2(C=100)
     train_and_eval_auc( train_x, train_y, test_x, test_y, model=lr )
 
 if __name__ == "__main__":
