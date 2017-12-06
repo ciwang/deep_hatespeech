@@ -17,13 +17,14 @@ HATEBASE_FIELDS = {
     'about_nationality': np.int32, 
     'about_sexual_orientation': np.int32, 
     'about_disability': np.int32, 
-    'offensiveness': float
+    # 'offensiveness': float
     # 'number_of_sightings': np.int32
 }
 
 def train_and_eval_auc( train_x, train_y, test_x, test_y, model=LR() ):
     model.fit( train_x, train_y )
     p = model.predict_proba( test_x )
+    print p
     # hack
     p = p[:,1] if p.shape[1] > 1 else p[:,0]
 

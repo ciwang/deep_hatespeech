@@ -2,6 +2,8 @@ import numpy as np
 import sys
 import tensorflow as tf
 
+from tensorflow.python import debug as tf_debug
+
 __author__ = 'Cindy Wang (adapted from Chris Potts)'
 
 class TfModelBase(object):
@@ -60,6 +62,7 @@ class TfModelBase(object):
             #y = self.onehot_encode(y)
         else:
             self.output_dim = y.shape[1]
+            self.classes = range(self.output_dim)
         return y
 
     def get_cost_function(self, **kwargs):

@@ -21,7 +21,7 @@ parser.add_argument('datafile', metavar='df', help='The data file to clean')
 args = parser.parse_args()
 
 def split_hashtag(hashtag):
-  hashtag_body = hashtag[1:-1]
+  hashtag_body = hashtag[1:]
   if hashtag_body.upper() == hashtag_body:
     result = '<hashtag> ' + hashtag_body + ' <allcaps>'
   else:
@@ -30,30 +30,31 @@ def split_hashtag(hashtag):
 
 def clean(text):
   text = re.sub(r'&#8220;|&#8221;|"', '', text)
-  text = re.sub(r'&#[0-9]{3,6};', ' <sym> ', text)
+  text = re.sub(r'&#[0-9]{3,8};', ' <sym> ', text)
+  text = re.sub(r'&gt;', '>', text)
+  text = re.sub(r'&lt;', '<', text)
 
   if args.twitter:
     # Different regex parts for smiley faces
     eyes = "[8:=;]"
     nose = "['`\-]?"
-    smile = eyes + nose + '[)d]+|[)d]+' + nose + eyes
-    lolface = eyes + nose + 'p+'
+    smile = eyes + nose + '[)dp]+|[(dp]+' + nose + eyes
     sadface = eyes + nose + '\(+|\)+' + nose + eyes
     neutralface = eyes + nose + '[\/|l*]'
 
-    text = re.sub(r'https?:\/\/\S+\b|www\.(\w+\.)+\S*',"<url>", text)
+    text = re.sub(r'https?:\/\/\S+\b|www\.(\w+\.)+\S*'," <url> ", text)
     text = re.sub("/"," / ", text) # Force splitting words appended with slashes (once we tokenized the URLs, of course)
-    text = re.sub(r'@\w+', "<user> ", text)
-    text = re.sub(smile, "<smile>", text, flags=re.IGNORECASE)
-    text = re.sub(lolface, "<lolface>", text, flags=re.IGNORECASE)
+    text = re.sub(r'@\w+', " <user> ", text)
+    text = re.sub(smile+ '|^[._]^', "<smile>", text, flags=re.IGNORECASE)
     text = re.sub(sadface, "<sadface>", text)
-    text = re.sub(neutralface, "<neutralface>", text)
-    text = re.sub(r'<3',"<heart>", text)
+    text = re.sub(neutralface + '|-[._]-', "<neutralface>", text)
+    text = re.sub(r'<3|&lt;3',"<heart>", text)
     text = re.sub(r'[-+]?[.\d]*[\d]+[:,.\d]*', "<number>", text)
+    text = re.sub(r',', ' ', text)
     text = re.sub(r'#\S+', lambda x: split_hashtag(x.group()), text) 
-    text = re.sub(r'([!?.]){2,}', lambda x: x.group()[1] + " <repeat>", text)
-    text = re.sub(r'\b(\S*?)(.)\2{3,}\b', lambda x: ''.join(x.group()) + ' <elong>', text)
-    text = re.sub(r'[A-Z]{2,}', lambda x: x.group().lower() + ' <allcaps>', text)
+    text = re.sub(r'([!?.<>]){2,}', lambda x: x.group()[1] + " <repeat> ", text)
+    text = re.sub(r'\b(\S*?)(.)\2{3,}\b', lambda x: ''.join(x.group()) + ' <elong> ', text)
+    text = re.sub(r'[A-Z]{2,}', lambda x: x.group().lower() + ' <allcaps> ', text)
 
   text = text.lower()
   return text
@@ -92,7 +93,7 @@ def save_files(prefix, tier, indices, data):
     tier_data.to_csv( y_file, header = True, quoting = 0, columns=['hate_speech', 'offensive_language', 'neither', 'class'] )
 
 def split_tier(data_prefix, data, train_percentage = 0.8, shuffle=False):
-  train_i, test_i = train_test_split( np.arange( len( data )), train_size = train_percentage, random_state = 44 )
+  train_i, test_i = train_test_split( data.index , train_size = train_percentage, random_state = 44 )
   save_files(data_prefix, 'train', train_i, data)
   save_files(data_prefix, 'test', test_i, data)
 

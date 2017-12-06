@@ -65,7 +65,7 @@ def process_glove(vocab):
                 word = array[0]
                 if word in vocab:
                     idx = vocab[word]
-                    vector = list(map(float, array[1:]))
+                    vector = list(map(np.float64, array[1:]))
                     glove[idx, :] = vector
         pd.DataFrame(glove).to_csv(EMBED_PATH, header = False, index = False)
 
@@ -139,8 +139,8 @@ def transform_data( transform, train_counts, test_counts ):
         test_x = test_x/test_counts.sum(axis=1)[:,None]
 
     if transform == 'uniq': # only encodes presence of word, not # occurrences
-        train_x = counts_to_vec( (train_counts > 0).astype(float) )
-        test_x = counts_to_vec( (test_counts > 0).astype(float) )
+        train_x = counts_to_vec( (train_counts > 0).astype(np.float64) )
+        test_x = counts_to_vec( (test_counts > 0).astype(np.float64) )
 
     if args.norm:
         train_x = normalize(train_x)

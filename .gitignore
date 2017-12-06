@@ -4,3 +4,5 @@
 data/
 log/
 sftp-config.json
+.ipynb_checkpoints/
+train/

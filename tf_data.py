@@ -10,6 +10,13 @@ import pandas as pd
 import tensorflow as tf
 from sklearn.feature_extraction.text import CountVectorizer
 
+_PAD = b"<pad>"
+_UNK = b"<unk>"
+_START_VOCAB = [_PAD, _UNK]
+
+PAD_ID = 0
+UNK_ID = 1
+
 def setup_args():
     parser = argparse.ArgumentParser()
     data_dir = os.path.join("data", "twitter_davidson")
@@ -18,22 +25,25 @@ def setup_args():
     # parser.add_argument("--random_init", default=True, type=bool)
     return parser.parse_args()
 
+def basic_tokenizer(sentence):
+    tokens = sentence.strip().split() #basic tokenizer
+    return [w.rstrip(' ?:!,;.()-_') for w in tokens if w.rstrip(' ?:!,;.()-_')]
+
 def create_vocabulary( vocab_path, data_raw ):
     if not os.path.isfile(vocab_path):
-        print("Creating vocabulary %s from data %s" % (vocab_path, str(data_paths)))
+        print("Creating vocabulary %s" % (vocab_path))
         vocab = {}
         for data in data_raw:
-            for line in tqdm(data, total=DATA_SIZE):
-                tokens = line.strip().split() #basic tokenizer
+            for line in tqdm(data):
+                tokens = basic_tokenizer(line) #basic tokenizer
                 for w in tokens:
-                    w = w.rstrip(' ?:!,;.')
                     if w in vocab:
                         vocab[w] += 1
                     else:
                         vocab[w] = 1
-        vocab = sorted(vocab, key=vocab.get, reverse=True)
+        vocab = _START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
         print("Vocabulary size: %d" % len(vocab))
-        with open(VOCAB_PATH, mode="wb") as vocab_file:
+        with open(vocab_path, mode="wb") as vocab_file:
             for w in vocab:
                 vocab_file.write(w + b"\n")
 
@@ -53,20 +63,21 @@ def process_glove( vocab, embed_path, glove_path, glove_dim ):
     GLOVE_SIZE = 1193514
 
     if not os.path.isfile(embed_path):
-        #glove = np.random.randn(len(vocab), GLOVE_DIM)
-        glove = np.zeros((len(vocab), glove_dim))
+        print "Writing embeddings to %s" % (embed_path)
+        #glove = np.zeros((len(vocab), glove_dim))
+        glove = np.random.randn(len(vocab), glove_dim)
         with open(glove_path, 'r') as fh:
             for line in tqdm(fh, total=GLOVE_SIZE):
                 array = line.strip().split(" ")
                 word = array[0]
                 if word in vocab:
                     idx = vocab[word]
-                    vector = list(map(float, array[1:]))
+                    vector = list(map(np.float64, array[1:]))
                     glove[idx, :] = vector
         pd.DataFrame(glove).to_csv(embed_path, header = False, index = False)
 
 def add_hb_embeddings( vocab, embeddings, hb_vocab_path, hb_embed_path ):
-    hb_embeddings = pd.read_csv(hb_embed_path, header = None, dtype = np.float32)
+    hb_embeddings = pd.read_csv(hb_embed_path, header = None, dtype = np.float64)
     hb_vocab = []
     with tf.gfile.GFile(hb_vocab_path, mode="rb") as f:
         hb_vocab.extend(f.readlines())
@@ -86,11 +97,11 @@ def counts_to_vec( counts, embeddings ):
         vecs.append(result)
     return np.stack(vecs, axis=0)
 
-def vectorize_data( data_raw, data_vec_path, vectorizer, embeddings ):
+def count_vectorize_data( data_raw, data_vec_path, vectorizer, embeddings ):
     counts = vectorizer.transform( data_raw.values.astype('U') ).toarray()
 
     # only encodes presence of word, not # occurrences
-    data_vec = counts_to_vec( (counts > 0).astype(float), embeddings )
+    data_vec = counts_to_vec( (counts > 0).astype(np.float64), embeddings )
 
     # concat hatebase features
     print "Generating hatebase features..."
@@ -99,6 +110,22 @@ def vectorize_data( data_raw, data_vec_path, vectorizer, embeddings ):
     data_vec = np.concatenate((data_vec, hatebase_vec), axis=1)
     pd.DataFrame(data_vec).to_csv(data_vec_path, header = False, index = False)
 
+def sentence_to_token_ids(sentence, vocab):
+    words = basic_tokenizer(sentence)
+    return [vocab.get(w, UNK_ID) for w in words]
+
+def data_to_token_ids(data_raw, data_ids_path, vocab):
+    if not os.path.isfile(data_ids_path):
+        print("Tokenizing data ...")
+        with tf.gfile.GFile(data_ids_path, mode="w") as ids_file:
+            counter = 0
+            for line in data_raw:
+                counter += 1
+                if counter % 5000 == 0:
+                    print("tokenizing line %d" % counter)
+                token_ids = sentence_to_token_ids(line, vocab)
+                ids_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")
+
 #
 
 USE_HB_EMBED = True
@@ -106,10 +133,10 @@ USE_HB_EMBED = True
 if __name__ == '__main__':
     args = setup_args()
     vocab_path = pjoin(args.data_dir, "vocab.dat")
-    embed_path = pjoin("data", "glove", "embeddings.%dd.dat") % args.glove_dim
-    glove_path = pjoin("data", "glove", "glove.twitter.%dd.txt") % args.glove_dim
+    embed_path = pjoin(args.data_dir, "embeddings.%dd.dat") % args.glove_dim
+    glove_path = pjoin("data", "glove", "glove.twitter.27B.%dd.txt") % args.glove_dim
     hb_vocab_path = pjoin("data", "hatebase", "vocab.dat")
-    hb_embed_path = pjoin("data", "hatebase", "embeddings.hidden.%dd.dat") % args.glove_dim
+    hb_embed_path = pjoin("data", "hatebase", "embeddings.new.%dd.dat") % args.glove_dim
 
     train_raw = pd.read_csv( pjoin(args.data_dir, "train.x"), header = 0, quoting = 0 )['tweet']
     test_raw = pd.read_csv( pjoin(args.data_dir, "test.x"), header = 0, quoting = 0 )['tweet']
@@ -118,19 +145,28 @@ if __name__ == '__main__':
     vocab = initialize_vocabulary(vocab_path)
     process_glove(vocab, embed_path, glove_path, args.glove_dim)
 
-    embeddings = pd.read_csv(embed_path, header = None, dtype = np.float32)
+    embeddings = pd.read_csv(embed_path, header = None, dtype = np.float64)
     if USE_HB_EMBED:
         embeddings = add_hb_embeddings(vocab, embeddings, hb_vocab_path, hb_embed_path)
+        embed_with_hb_path = pjoin(args.data_dir, "embeddings.withhb.%dd.dat") % args.glove_dim
+        embeddings.to_csv(embed_with_hb_path, header = False, index = False)
 
-    vectorizer = CountVectorizer( analyzer = "word", tokenizer = None, preprocessor = None, 
-                                    vocabulary = vocab )
-    # vectorize and write data
-    print "Vectorizing and writing ..."
-    if USE_HB_EMBED:
-        train_vec_path = pjoin(args.data_dir, "train.withhidden.%dd.vec" % args.glove_dim)
-        test_vec_path = pjoin(args.data_dir, "test.withhidden.%dd.vec" % args.glove_dim)
-    else:
-        train_vec_path = pjoin(args.data_dir, "train.%dd.vec" % args.glove_dim)
-        test_vec_path = pjoin(args.data_dir, "test.%dd.vec" % args.glove_dim)
-    vectorize_data(train_raw, train_vec_path, vectorizer, embeddings)
-    vectorize_data(test_raw, test_vec_path, vectorizer, embeddings)
+    # NOTE: This block probably obscure now that we're using RNN
+    # vectorizer = CountVectorizer( analyzer = "word", tokenizer = basic_tokenizer, preprocessor = None, 
+    #                                 vocabulary = vocab )
+    # # vectorize and write data
+    # print "Vectorizing and writing ..."
+    # if USE_HB_EMBED:
+    #     train_vec_path = pjoin(args.data_dir, "train.withhidden.%dd.vec" % args.glove_dim)
+    #     test_vec_path = pjoin(args.data_dir, "test.withhidden.%dd.vec" % args.glove_dim)
+    # else:
+    #     train_vec_path = pjoin(args.data_dir, "train.%dd.vec" % args.glove_dim)
+    #     test_vec_path = pjoin(args.data_dir, "test.%dd.vec" % args.glove_dim)
+    # count_vectorize_data(train_raw, train_vec_path, vectorizer, embeddings)
+    # count_vectorize_data(test_raw, test_vec_path, vectorizer, embeddings)
+
+    # write ids of data
+    # train_ids_path = pjoin(args.data_dir, "train.ids.vec")
+    # test_ids_path = pjoin(args.data_dir, "test.ids.vec")
+    # data_to_token_ids(train_raw, train_ids_path, vocab)
+    # data_to_token_ids(test_raw, test_ids_path, vocab)

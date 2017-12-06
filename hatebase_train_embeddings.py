@@ -1,8 +1,9 @@
-from tf_custom_models import OneLayerNN
+from tf_custom_models import OneLayerNNRetrofit
 from utility import train_and_eval_auc, HATEBASE_FIELDS
 from sklearn.model_selection import train_test_split
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
+from sklearn.metrics import roc_auc_score as AUC
 import scipy.spatial.distance
 from operator import itemgetter
 
@@ -27,7 +28,7 @@ FLAGS = tf.app.flags.FLAGS
 # tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 # tf.app.flags.DEFINE_integer("batch_size", 10, "Batch size to use during training.")
 # tf.app.flags.DEFINE_integer("epochs", 0, "Number of epochs to train.")
-tf.app.flags.DEFINE_integer("state_size", 50, "Size of hidden layer.")
+# tf.app.flags.DEFINE_integer("state_size", 50, "Size of hidden layer.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary. (default 100)")
 tf.app.flags.DEFINE_string("data_dir", "data/hatebase", "Hatebase directory (default ./data/hatebase)")
 tf.app.flags.DEFINE_string("vocab_path", "data/twitter_davidson/vocab.dat", "Path to vocab file (default: ./data/twitter_davidson/vocab.dat)")
@@ -47,7 +48,7 @@ def load_embeddings(embed_path, vocab, force=False):
                 if word in vocab:
                     idx = vocab[word]
                     found.append(idx)
-                    vector = list(map(float, array[1:]))
+                    vector = list(map(np.float64, array[1:]))
                     hb_vecs[idx, :] = vector
             # words not found are set to random
             # avg = hb_vecs[found, :].mean(axis=0)
@@ -60,7 +61,7 @@ def load_embeddings(embed_path, vocab, force=False):
         return hb_vecs, found, unfound
 
     with open(embed_path, 'rb') as embed_path:
-        data_x = pd.read_csv( embed_path, header = None, quoting = 0, dtype = np.float32 )
+        data_x = pd.read_csv( embed_path, header = None, quoting = 0, dtype = np.float64 )
         return data_x
 
 def get_compare_embeddings(original_embeddings, tuned_embeddings, vocab, dimreduce_type="pca", random_state=0):
@@ -155,33 +156,56 @@ def neighbors(word, mat, rownames, distfunc=cosine):
     dists = [(rownames[i], distfunc(w, mat[i])) for i in range(len(mat))]
     return sorted(dists, key=itemgetter(1), reverse=False)
 
+def get_multioutput_y(data_y):
+    # y transformed from [[0,0,1],[1,0,1]] => [[[1,0],[0,1]],...]
+    # one hots in pos i of each vec form y_i
+    y = []
+    for i in range(len(HATEBASE_FIELDS)):
+        y.append([np.eye(2)[vec[i]] for vec in data_y.values])
+    return y
+
 def main(_):
     embed_path = pjoin(FLAGS.data_dir, "embeddings.%dd.dat") % FLAGS.embedding_size
+    new_embed_path = pjoin(FLAGS.data_dir, "embeddings.new.%dd.dat") % FLAGS.embedding_size
     hb_path = pjoin(FLAGS.data_dir, "lexicon.csv")
 
     hatebase_data = pd.read_csv( hb_path, header = 0, index_col = 0, quoting = 0, 
-                                    dtype = HATEBASE_FIELDS, usecols = range(9) )
+                                    dtype = HATEBASE_FIELDS, usecols = range(len(HATEBASE_FIELDS)+1) )
     vocab = dict([(x, y) for (y, x) in enumerate(hatebase_data.index)])
     hatebase_embeddings = load_embeddings(embed_path, vocab, FLAGS.force_load_embeddings)
 
-    print neighbors("bitch", hatebase_embeddings.values, list(hatebase_data.index.values), cosine)[:5]
-    print neighbors("hoe", hatebase_embeddings.values, list(hatebase_data.index.values), cosine)[:5]
-    print neighbors("redneck", hatebase_embeddings.values, list(hatebase_data.index.values), cosine)[:5]
+    # print neighbors("bitch", hatebase_embeddings.values, list(hatebase_data.index.values), cosine)[:5]
+    # print neighbors("hoe", hatebase_embeddings.values, list(hatebase_data.index.values), cosine)[:5]
+    # print neighbors("redneck", hatebase_embeddings.values, list(hatebase_data.index.values), cosine)[:5]
     
-    train_i, test_i = train_test_split( np.arange( len( hatebase_embeddings )), train_size = 0.9, random_state = 44 )
-    train_x = hatebase_embeddings.ix[train_i]
-    test_x = hatebase_embeddings.ix[test_i]
-    train_y = hatebase_data.ix[train_i]
-    test_y = hatebase_data.ix[test_i]
+    train_i, test_i = train_test_split( np.arange( len( hatebase_embeddings )), train_size = 0.8, random_state = 44 )
+    train_x = hatebase_embeddings.ix[train_i].values
+    test_x = hatebase_embeddings.ix[test_i].values
+    train_y = get_multioutput_y(hatebase_data.ix[train_i])
+    test_y = get_multioutput_y(hatebase_data.ix[test_i])
 
-    nn = OneLayerNN(h=FLAGS.state_size)
-    #train_and_eval_auc( train_x, train_y, test_x, test_y, model=nn )
-    nn.fit( hatebase_embeddings, hatebase_data )
-    hidden_states = nn.return_hidden_states( hatebase_embeddings )
+    nn = OneLayerNNRetrofit(h=200, max_iter=4000, retrofit_iter=2000)
+    new_embeddings = nn.fit( train_x, train_y )
 
-    print neighbors("bitch", hidden_states, list(hatebase_data.index.values), cosine)[:5]
-    print neighbors("hoe", hidden_states, list(hatebase_data.index.values), cosine)[:5]
-    print neighbors("redneck", hidden_states, list(hatebase_data.index.values), cosine)[:5]
+    probs = nn.predict_proba( test_x )
+
+    total_auc = 0
+    for i in range(len(probs)):
+        # hack to get the positive class
+        y = [s[1] for s in test_y[i]]
+        y_pred = [s[1] for s in probs[i]]
+        auc = AUC( y, y_pred )
+        print HATEBASE_FIELDS.keys()[i], "AUC:", auc
+        total_auc += auc
+    print "Average AUC:", total_auc/len(probs)
+
+    new_embeddings = pd.DataFrame(new_embeddings)
+    new_embeddings.to_csv(new_embed_path, header = False, index = False)
+    # hidden_states = nn.return_hidden_states( hatebase_embeddings )
+
+    # print neighbors("bitch", hidden_states, list(hatebase_data.index.values), cosine)[:5]
+    # print neighbors("hoe", hidden_states, list(hatebase_data.index.values), cosine)[:5]
+    # print neighbors("redneck", hidden_states, list(hatebase_data.index.values), cosine)[:5]
     #print_embeddings( [hatebase_embeddings.values, hidden_states], vocab, 50 )
     #print_embeddings( [hatebase_embeddings.ix[unfound_i].values, hidden_states[unfound_i, :]], unfound_vocab )
     # print_embeddings( [hatebase_embeddings.ix[found_i].values, hidden_states[found_i, :]], found_vocab )
