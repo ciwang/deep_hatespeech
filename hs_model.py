@@ -28,7 +28,7 @@ class Encoder(object):
     def __init__(self, state_size, embedding_size, dropout):
         self.state_size = state_size
         self.embedding_size = embedding_size
-        self.dropout = dropout
+        self.keep_prob = 1-dropout
 
     def encode(self, inputs, masks, scope="", reuse=False):
         """
@@ -47,8 +47,8 @@ class Encoder(object):
         """
         # symbolic function takes in Tensorflow object, returns tensorflow object
 
-        cell = tf.contrib.rnn.BasicLSTMCell(self.state_size)
-        self.cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=self.dropout)
+        self.cell = tf.contrib.rnn.BasicLSTMCell(self.state_size)
+        #self.cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=self.keep_prob, seed=42)
         with vs.variable_scope(scope):
             _, (c_state, m_state) = tf.nn.dynamic_rnn(self.cell, inputs, sequence_length=masks, dtype=tf.float64)
 
@@ -71,9 +71,9 @@ class Decoder(object):
         :return: Probability distribution over classes
         """
         W = tf.get_variable("W", shape=(self.state_size, self.output_size),
-                        initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float64)
+                        initializer=tf.contrib.layers.xavier_initializer(seed=42), dtype=tf.float64)
         b = tf.get_variable("b", shape=(self.output_size),
-                        initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float64)
+                        initializer=tf.contrib.layers.xavier_initializer(seed=42), dtype=tf.float64)
 
         return tf.matmul(inputs, W) + b
 
@@ -303,6 +303,7 @@ class HateSpeechSystem(object):
         :return:
         """
 
+        random.seed(42)
         tic = time.time()
         params = tf.trainable_variables()
         num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
@@ -350,3 +351,7 @@ class HateSpeechSystem(object):
 
             logging.info("Best train: Epoch %d AUC: %f" % best_train)
             logging.info("Best test: Epoch %d AUC: %f" % best_test)
+            if best_test[0] - e > 5:
+                logging.info("Best test epoch has not changed for over 5 epochs. Halting training.")
+                break
+

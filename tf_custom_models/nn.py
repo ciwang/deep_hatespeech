@@ -104,6 +104,7 @@ class OneLayerNNRetrofit(TfModelBase):
                 feed_dict=self.train_dict(X, y))
             if i > self.max_iter - self.retrofit_iter:
                 X -= gradients[0]*self.eta #make more efficient
+                print X
             if loss < self.tol:
                 self.progressbar("stopping with loss < self.tol", i)
                 return True
