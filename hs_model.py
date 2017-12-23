@@ -25,34 +25,39 @@ def get_optimizer(opt):
     return optfn
 
 class Encoder(object):
-    def __init__(self, state_size, embedding_size, dropout):
+    def __init__(self, state_size, embedding_size, num_layers, dropout):
         self.state_size = state_size
         self.embedding_size = embedding_size
+        self.num_layers = num_layers
         self.keep_prob = 1-dropout
 
-    def encode(self, inputs, masks, scope="", reuse=False):
+    def encode(self, inputs, masks, reuse=False):
         """
         In a generalized encode function, you pass in your inputs,
-        masks, and an initial
-        hidden state input into this function.
+        masks, and an initial hidden state input into this function.
 
         :param inputs: Tweets, with shape [batch_size, tweet_size, embed_size]
         :param masks: this is to make sure tf.nn.dynamic_rnn doesn't iterate
                       through masked steps
         :param encoder_state_input: (Optional) pass this as initial hidden state
                                     to tf.nn.dynamic_rnn to build conditional representations
-        :return: an encoded representation of your input.
-                 It can be context-level representation, word-level representation,
-                 or both.
+        :return: Encodings of each tweet. A tensor of shape [batch_size, state_size]
         """
         # symbolic function takes in Tensorflow object, returns tensorflow object
 
-        self.cell = tf.contrib.rnn.BasicLSTMCell(self.state_size)
-        #self.cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=self.keep_prob, seed=42)
-        with vs.variable_scope(scope):
-            _, (c_state, m_state) = tf.nn.dynamic_rnn(self.cell, inputs, sequence_length=masks, dtype=tf.float64)
+        stacked_rnn = []
+        for _ in range(self.num_layers):
+            cell = tf.contrib.rnn.BasicLSTMCell(self.state_size)
+            cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=self.keep_prob, seed=42)
+            stacked_rnn.append(cell)
+        self.cell = tf.contrib.rnn.MultiRNNCell(stacked_rnn)
 
-        return m_state
+        with tf.variable_scope('rnn'):
+            # _, (_, m_state) = tf.nn.dynamic_rnn(self.cell, inputs, sequence_length=masks, dtype=tf.float64)
+            _, final_state = tf.nn.dynamic_rnn(self.cell, inputs, sequence_length=masks, dtype=tf.float64)
+
+        _, final_m_state = final_state[-1] # get the final state from the last hidden layer
+        return final_m_state
 
 class Decoder(object):
     def __init__(self, state_size, output_size):
@@ -70,10 +75,11 @@ class Decoder(object):
         :param inputs: Hidden reps of each tweet with shape [batch_size, state_size]
         :return: Probability distribution over classes
         """
-        W = tf.get_variable("W", shape=(self.state_size, self.output_size),
-                        initializer=tf.contrib.layers.xavier_initializer(seed=42), dtype=tf.float64)
-        b = tf.get_variable("b", shape=(self.output_size),
-                        initializer=tf.contrib.layers.xavier_initializer(seed=42), dtype=tf.float64)
+        with tf.variable_scope('softmax'):
+            W = tf.get_variable("W", shape=(self.state_size, self.output_size),
+                            initializer=tf.contrib.layers.xavier_initializer(seed=42), dtype=tf.float64)
+            b = tf.get_variable("b", shape=(self.output_size),
+                            initializer=tf.contrib.layers.xavier_initializer(seed=42), dtype=tf.float64)
 
         return tf.matmul(inputs, W) + b
 
@@ -83,8 +89,7 @@ class HateSpeechSystem(object):
         """
         Initializes your System
 
-        :param encoder: an encoder that you constructed in train.py
-        :param decoder: a decoder that you constructed in train.py
+        :param FLAGS: Tensorflow init flags
         :param args: pass in more arguments as needed
         """
         # ==== constants ====
@@ -112,8 +117,8 @@ class HateSpeechSystem(object):
         to assemble your reading comprehension system!
         :return:
         """
-        encoder = Encoder(self.FLAGS.state_size, self.FLAGS.embedding_size, self.FLAGS.dropout)
-        H_r = encoder.encode(self.tweets_var, self.masks_placeholder, scope="tweet")
+        encoder = Encoder(self.FLAGS.state_size, self.FLAGS.embedding_size, self.FLAGS.num_layers, self.FLAGS.dropout)
+        H_r = encoder.encode(self.tweets_var, self.masks_placeholder)
 
         decoder = Decoder(self.FLAGS.state_size, self.FLAGS.output_size)
         self.model = decoder.decode(H_r)
@@ -304,6 +309,7 @@ class HateSpeechSystem(object):
         """
 
         random.seed(42)
+        print random.random()
         tic = time.time()
         params = tf.trainable_variables()
         num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
