@@ -17,6 +17,8 @@ _START_VOCAB = [_PAD, _UNK]
 PAD_ID = 0
 UNK_ID = 1
 
+TWEET_SIZE = 20
+
 def setup_args():
     parser = argparse.ArgumentParser()
     data_dir = os.path.join("data", "twitter_davidson")
@@ -110,11 +112,14 @@ def count_vectorize_data( data_raw, data_vec_path, vectorizer, embeddings ):
     data_vec = np.concatenate((data_vec, hatebase_vec), axis=1)
     pd.DataFrame(data_vec).to_csv(data_vec_path, header = False, index = False)
 
-def sentence_to_token_ids(sentence, vocab):
+def sentence_to_token_ids(sentence, vocab, pad=False):
     words = basic_tokenizer(sentence)
-    return [vocab.get(w, UNK_ID) for w in words]
+    ids = [vocab.get(w, UNK_ID) for w in words]
+    if pad:
+        ids = ids[:TWEET_SIZE] + [PAD_ID] * (TWEET_SIZE - min(len(ids), TWEET_SIZE))
+    return ids
 
-def data_to_token_ids(data_raw, data_ids_path, vocab):
+def data_to_token_ids(data_raw, data_ids_path, vocab, pad=False):
     if not os.path.isfile(data_ids_path):
         print("Tokenizing data ...")
         with tf.gfile.GFile(data_ids_path, mode="w") as ids_file:
@@ -123,12 +128,12 @@ def data_to_token_ids(data_raw, data_ids_path, vocab):
                 counter += 1
                 if counter % 5000 == 0:
                     print("tokenizing line %d" % counter)
-                token_ids = sentence_to_token_ids(line, vocab)
+                token_ids = sentence_to_token_ids(line, vocab, pad)
                 ids_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")
 
 #
 
-USE_HB_EMBED = True
+USE_HB_EMBED = False
 
 if __name__ == '__main__':
     args = setup_args()
@@ -166,7 +171,7 @@ if __name__ == '__main__':
     # count_vectorize_data(test_raw, test_vec_path, vectorizer, embeddings)
 
     # write ids of data
-    # train_ids_path = pjoin(args.data_dir, "train.ids.vec")
-    # test_ids_path = pjoin(args.data_dir, "test.ids.vec")
-    # data_to_token_ids(train_raw, train_ids_path, vocab)
-    # data_to_token_ids(test_raw, test_ids_path, vocab)
+    train_ids_path = pjoin(args.data_dir, "train.ids.padded.vec")
+    test_ids_path = pjoin(args.data_dir, "test.ids.padded.vec")
+    data_to_token_ids(train_raw, train_ids_path, vocab, pad=True)
+    data_to_token_ids(test_raw, test_ids_path, vocab, pad=True)

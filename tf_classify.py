@@ -33,11 +33,14 @@ tf.app.flags.DEFINE_string("data_dir", "data/twitter_davidson", "SQuAD directory
 tf.app.flags.DEFINE_string("train_dir", "train", "Training directory (default: ./train).")
 tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (default: ./log)")
 tf.app.flags.DEFINE_integer("print_every", 100, "How many iterations to do per print.")
-tf.app.flags.DEFINE_integer("keep", 0, "How many checkpoints to keep, 0 indicates keep all.")
+tf.app.flags.DEFINE_integer("save_every", 2000, "How many iterations to do per save checkpoint and evaluate.")
 tf.app.flags.DEFINE_string("vocab_path", "data/twitter_davidson/vocab.dat", "Path to vocab file (default: ./data/twitter_davidson/vocab.dat)")
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the GLoVe embedding (default: ./data/twitter_davidson/embeddings.{embedding_size}d.dat)")
 
-def initialize_model(session, model, train_dir):
+def initialize_model(session, model, train_dir, seed=42):
+    tf.set_random_seed(seed)
+    np.random.seed(seed)
+
     ckpt = tf.train.get_checkpoint_state(train_dir)
     v2_path = ckpt.model_checkpoint_path + ".index" if ckpt else ""
     if ckpt and (tf.gfile.Exists(ckpt.model_checkpoint_path) or tf.gfile.Exists(v2_path)):
@@ -45,7 +48,8 @@ def initialize_model(session, model, train_dir):
         model.saver.restore(session, ckpt.model_checkpoint_path)
     else:
         logging.info("Created model with fresh parameters.")
-        session.run(tf.global_variables_initializer())
+        init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+        session.run(init_op)
         logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
     return model
 
@@ -68,22 +72,19 @@ def initialize_vocab(vocab_path):
 #         data_y = pd.read_csv( y_file, header = 0, quoting = 0, usecols = ['hate_speech'], dtype = np.int32)
 #         return (data_x.values, data_y.values.ravel())
 
-def load_dataset(x_file, y_file, batch_size):
-    dataset = []
-
+def load_dataset(x_file, y_file):
     with open(x_file, 'rb') as x_file, open(y_file, 'rb') as y_file:
-        data_x = []
-        for line in x_file.readlines():
-            data_x.append(map(lambda x: int(x), line.rstrip().split()))
+        data_x = np.loadtxt( x_file, delimiter = ' ', dtype = int)
 
         data_y = pd.read_csv( y_file, header = 0, quoting = 0, usecols = ['hate_speech'], dtype = int)
-        data_y = data_y.values.ravel().tolist()
+        data_y = data_y.values.ravel()
 
-        for i in range(len(data_x)/batch_size):
-            start = batch_size*i
-            end = batch_size*(i+1)
-            dataset.append((data_x[start:end], data_y[start:end]))
-    return dataset
+        # for i in range(len(data_x)/batch_size):
+        #     start = batch_size*i
+        #     end = batch_size*(i+1)
+        #     dataset.append((data_x[start:end], data_y[start:end]))
+        
+        return data_x, data_y
 
 def main(_):
     FLAGS.embed_path = FLAGS.embed_path or pjoin("data", "twitter_davidson", "embeddings.{}d.dat".format(FLAGS.embedding_size))
@@ -96,24 +97,24 @@ def main(_):
     with open(pjoin(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
 
-    train_x_path = pjoin(FLAGS.data_dir, "train.ids.vec")
+    train_x_path = pjoin(FLAGS.data_dir, "train.ids.padded.vec")
     train_y_path = pjoin(FLAGS.data_dir, "train.y")
-    test_x_path = pjoin(FLAGS.data_dir, "test.ids.vec")
+    test_x_path = pjoin(FLAGS.data_dir, "test.ids.padded.vec")
     test_y_path = pjoin(FLAGS.data_dir, "test.y")
 
-    train_dataset = load_dataset(train_x_path, train_y_path, FLAGS.batch_size)
-    test_dataset = load_dataset(test_x_path, test_y_path, FLAGS.batch_size) #FLAGS.batch_size
+    train_x, train_y = load_dataset(train_x_path, train_y_path)
+    test_x, test_y = load_dataset(test_x_path, test_y_path) #FLAGS.batch_size
 
     vocab, rev_vocab = initialize_vocab(FLAGS.vocab_path) # one is list and one is dict
 
     #lr = SoftmaxClassifier(max_iter=FLAGS.epochs)
     #lr = LRClassifierL2(C=100)
     # train_and_eval_auc( train_x, train_y, test_x, test_y, model=lr )
-    hs = HateSpeechSystem(FLAGS)
+    hs = HateSpeechSystem( FLAGS, train_x, train_y )
 
     with tf.Session() as sess:
         initialize_model(sess, hs, FLAGS.train_dir)
-        hs.train(sess, train_dataset, test_dataset, FLAGS.train_dir, rev_vocab)
+        hs.train(sess, train_x, train_y, test_x, test_y)
         # get predictions
         # write predictions
 
