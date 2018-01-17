@@ -29,11 +29,13 @@ def length(sequence):
     return tf.cast(tf.reduce_sum(used, reduction_indices=1), tf.int32)
 
 class Encoder(object):
-    def __init__(self, state_size, embedding_size, num_layers, dropout):
+    def __init__(self, state_size, embedding_size, num_layers, input_dropout, output_dropout, state_dropout):
         self.state_size = state_size
         self.embedding_size = embedding_size
         self.num_layers = num_layers
-        self.keep_prob = 1-dropout
+        self.input_keep_prob = 1 - input_dropout
+        self.output_keep_prob = 1 - output_dropout
+        self.state_keep_prob = 1 - state_dropout
 
     def encode(self, inputs, reuse=False):
         """
@@ -51,9 +53,15 @@ class Encoder(object):
 
         with tf.variable_scope('rnn', reuse=tf.AUTO_REUSE):
             stacked_rnn = []
-            for _ in range(self.num_layers):
+            for i in range(self.num_layers):
                 cell = tf.contrib.rnn.BasicLSTMCell(self.state_size)
-                cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=self.keep_prob)
+                cell = tf.contrib.rnn.DropoutWrapper(cell, 
+                            input_keep_prob=self.input_keep_prob,
+                            output_keep_prob=self.output_keep_prob,
+                            state_keep_prob=self.state_keep_prob,
+                            variational_recurrent=True,
+                            input_size=self.embedding_size if i == 0 else self.state_size,
+                            dtype=tf.float64)
                 stacked_rnn.append(cell)
             self.cell = tf.contrib.rnn.MultiRNNCell(stacked_rnn)
             # _, (_, m_state) = tf.nn.dynamic_rnn(self.cell, inputs, sequence_length=masks, dtype=tf.float64)
@@ -122,7 +130,12 @@ class HateSpeechSystem(object):
         to assemble your reading comprehension system!
         :return:
         """
-        self.encoder = Encoder(self.FLAGS.state_size, self.FLAGS.embedding_size, self.FLAGS.num_layers, self.FLAGS.dropout)
+        self.encoder = Encoder(self.FLAGS.state_size, 
+                            self.FLAGS.embedding_size, 
+                            self.FLAGS.num_layers, 
+                            self.FLAGS.input_dropout,
+                            self.FLAGS.output_dropout,
+                            self.FLAGS.state_dropout)
         H_r = self.encoder.encode(self.tweets_var)
 
         self.decoder = Decoder(self.FLAGS.state_size, self.FLAGS.output_size)
@@ -148,7 +161,7 @@ class HateSpeechSystem(object):
     def setup_embeddings(self):
         """
         Loads distributed word representations based on placeholder tokens
-        :return:
+        :self.tweets_var: tf.Variable with same shape as inputs [batch_size, tweet_size, embed_size]
         """
         with vs.variable_scope("embeddings"):
             # load data
@@ -237,8 +250,8 @@ class HateSpeechSystem(object):
 
                     logging.info("Best train: Epoch %d AUC: %f" % best_train)
                     logging.info("Best test: Epoch %d AUC: %f" % best_test)
-                    if curr_epoch - best_test[0] > 4:
-                        logging.info("Best test epoch has not changed for 5 epochs. Halting training.")
+                    if best_test[1] - test_auc >= 0.1:
+                        logging.info("Test error has diverged. Halting training.")
                         break
         except tf.errors.OutOfRangeError:
             print('Saving')

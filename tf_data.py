@@ -17,7 +17,7 @@ _START_VOCAB = [_PAD, _UNK]
 PAD_ID = 0
 UNK_ID = 1
 
-TWEET_SIZE = 20
+TWEET_SIZE = 32
 
 def setup_args():
     parser = argparse.ArgumentParser()
@@ -112,6 +112,13 @@ def count_vectorize_data( data_raw, data_vec_path, vectorizer, embeddings ):
     data_vec = np.concatenate((data_vec, hatebase_vec), axis=1)
     pd.DataFrame(data_vec).to_csv(data_vec_path, header = False, index = False)
 
+def write_coocurr_matrix( data_raw, matrix_path, vectorizer ):
+    counts = vectorizer.transform( data_raw.values.astype('U') )
+    print "Multiplying ... "
+    co_matrix = counts.T * counts
+    print "Writing ..."
+    pd.DataFrame(co_matrix.toarray()).to_csv(matrix_path, header = False, index = False)
+
 def sentence_to_token_ids(sentence, vocab, pad=False):
     words = basic_tokenizer(sentence)
     ids = [vocab.get(w, UNK_ID) for w in words]
@@ -148,18 +155,19 @@ if __name__ == '__main__':
     
     create_vocabulary(vocab_path, [train_raw, test_raw])
     vocab = initialize_vocabulary(vocab_path)
-    process_glove(vocab, embed_path, glove_path, args.glove_dim)
-
-    embeddings = pd.read_csv(embed_path, header = None, dtype = np.float64)
-    if USE_HB_EMBED:
-        embeddings = add_hb_embeddings(vocab, embeddings, hb_vocab_path, hb_embed_path)
-        embed_with_hb_path = pjoin(args.data_dir, "embeddings.withhb.%dd.dat") % args.glove_dim
-        embeddings.to_csv(embed_with_hb_path, header = False, index = False)
+    
+    # write embeddings
+    # process_glove(vocab, embed_path, glove_path, args.glove_dim)
+    # embeddings = pd.read_csv(embed_path, header = None, dtype = np.float64)
+    # if USE_HB_EMBED:
+    #     embeddings = add_hb_embeddings(vocab, embeddings, hb_vocab_path, hb_embed_path)
+    #     embed_with_hb_path = pjoin(args.data_dir, "embeddings.withhb.%dd.dat") % args.glove_dim
+    #     embeddings.to_csv(embed_with_hb_path, header = False, index = False)
 
     # NOTE: This block probably obscure now that we're using RNN
     # vectorizer = CountVectorizer( analyzer = "word", tokenizer = basic_tokenizer, preprocessor = None, 
     #                                 vocabulary = vocab )
-    # # vectorize and write data
+    # vectorize and write data
     # print "Vectorizing and writing ..."
     # if USE_HB_EMBED:
     #     train_vec_path = pjoin(args.data_dir, "train.withhidden.%dd.vec" % args.glove_dim)
@@ -171,7 +179,7 @@ if __name__ == '__main__':
     # count_vectorize_data(test_raw, test_vec_path, vectorizer, embeddings)
 
     # write ids of data
-    train_ids_path = pjoin(args.data_dir, "train.ids.padded.vec")
-    test_ids_path = pjoin(args.data_dir, "test.ids.padded.vec")
+    train_ids_path = pjoin(args.data_dir, "train.ids.%dd.vec" % TWEET_SIZE)
+    test_ids_path = pjoin(args.data_dir, "test.ids.%dd.vec" % TWEET_SIZE)
     data_to_token_ids(train_raw, train_ids_path, vocab, pad=True)
     data_to_token_ids(test_raw, test_ids_path, vocab, pad=True)
