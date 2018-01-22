@@ -138,6 +138,11 @@ def data_to_token_ids(data_raw, data_ids_path, vocab, pad=False):
                 token_ids = sentence_to_token_ids(line, vocab, pad)
                 ids_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")
 
+def data_to_hb(data_raw, hb_vec_path):
+    print "Generating hatebase features..."
+    hatebase_vec = hatebase_features( data_raw.values.astype('U') )
+    pd.DataFrame(hatebase_vec).to_csv(hb_vec_path, header = False, index = False)
+
 #
 
 USE_HB_EMBED = False
@@ -153,9 +158,9 @@ if __name__ == '__main__':
     train_raw = pd.read_csv( pjoin(args.data_dir, "train.x"), header = 0, quoting = 0 )['tweet']
     test_raw = pd.read_csv( pjoin(args.data_dir, "test.x"), header = 0, quoting = 0 )['tweet']
     
-    create_vocabulary(vocab_path, [train_raw, test_raw])
-    vocab = initialize_vocabulary(vocab_path)
-    
+    # create_vocabulary(vocab_path, [train_raw, test_raw])
+    # vocab = initialize_vocabulary(vocab_path)
+
     # write embeddings
     # process_glove(vocab, embed_path, glove_path, args.glove_dim)
     # embeddings = pd.read_csv(embed_path, header = None, dtype = np.float64)
@@ -179,7 +184,13 @@ if __name__ == '__main__':
     # count_vectorize_data(test_raw, test_vec_path, vectorizer, embeddings)
 
     # write ids of data
-    train_ids_path = pjoin(args.data_dir, "train.ids.%dd.vec" % TWEET_SIZE)
-    test_ids_path = pjoin(args.data_dir, "test.ids.%dd.vec" % TWEET_SIZE)
-    data_to_token_ids(train_raw, train_ids_path, vocab, pad=True)
-    data_to_token_ids(test_raw, test_ids_path, vocab, pad=True)
+    # train_ids_path = pjoin(args.data_dir, "train.ids.%dd.vec" % TWEET_SIZE)
+    # test_ids_path = pjoin(args.data_dir, "test.ids.%dd.vec" % TWEET_SIZE)
+    # data_to_token_ids(train_raw, train_ids_path, vocab, pad=True)
+    # data_to_token_ids(test_raw, test_ids_path, vocab, pad=True)
+
+    print "Generating hatebase features..."
+    train_hb_path = pjoin(args.data_dir, "train.hb.vec")
+    test_hb_path = pjoin(args.data_dir, "test.hb.vec")
+    data_to_hb(train_raw, train_hb_path)
+    data_to_hb(test_raw, test_hb_path)

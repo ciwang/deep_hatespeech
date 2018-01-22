@@ -138,8 +138,12 @@ class HateSpeechSystem(object):
                             self.FLAGS.state_dropout)
         H_r = self.encoder.encode(self.tweets_var)
 
-        self.decoder = Decoder(self.FLAGS.state_size, self.FLAGS.output_size)
-        self.model = self.decoder.decode(H_r)
+        if self.FLAGS.model_type == 'hb_append':
+            self.decoder = Decoder(self.FLAGS.state_size + self.FLAGS.hatebase_size, self.FLAGS.output_size)
+            self.model = self.decoder.decode(H_r)
+        else:
+            self.decoder = Decoder(self.FLAGS.state_size, self.FLAGS.output_size)
+            self.model = self.decoder.decode(H_r)
 
     def setup_loss(self):
         """

@@ -17,7 +17,7 @@ HATEBASE_FIELDS = {
     'about_nationality': np.int32, 
     'about_sexual_orientation': np.int32, 
     'about_disability': np.int32, 
-    # 'offensiveness': float
+    'offensiveness': float
     # 'number_of_sightings': np.int32
 }
 
