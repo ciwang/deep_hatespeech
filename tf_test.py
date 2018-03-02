@@ -1,5 +1,5 @@
-# from tf_custom_models import LRClassifierL2, SoftmaxClassifier
-from utility import train_and_eval_auc
+from utility import hatebase_features
+from utility.twitter_preprocess import clean
 
 import os
 from os.path import join as pjoin
@@ -12,7 +12,7 @@ import logging
 import json
 
 from hs_model import HateSpeechSystem
-import tf_data
+from tf_data import *
 
 logging.basicConfig(level=logging.INFO)
 
@@ -20,24 +20,24 @@ FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_string("model_type", "classic", "classic / hb_embed / hb_append")
 tf.app.flags.DEFINE_boolean("bidirectional", False, "Bidirectionality of LSTM")
-tf.app.flags.DEFINE_string("scoring", "auc", "auc / f1_macro")
+tf.app.flags.DEFINE_string("scoring", "f1_macro", "auc / f1_macro")
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
-tf.app.flags.DEFINE_float("input_dropout", 0.35, "Fraction of input units randomly dropped.")
-tf.app.flags.DEFINE_float("output_dropout", 0.35, "Fraction of output units randomly dropped.")
-tf.app.flags.DEFINE_float("state_dropout", 0.2, "Fraction of units randomly dropped on recurrent connections.")
-tf.app.flags.DEFINE_float("embedding_dropout", 0.3, "Fraction of embeddings randomly dropped on lookup.")
+tf.app.flags.DEFINE_float("input_dropout", 0.0, "Fraction of input units randomly dropped.")
+tf.app.flags.DEFINE_float("output_dropout", 0.0, "Fraction of output units randomly dropped.")
+tf.app.flags.DEFINE_float("state_dropout", 0.0, "Fraction of units randomly dropped on recurrent connections.")
+tf.app.flags.DEFINE_float("embedding_dropout", 0.0, "Fraction of embeddings randomly dropped on lookup.")
 tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
 tf.app.flags.DEFINE_integer("batch_size", 16, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("epochs", 1000, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("state_size", 100, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 2, "Number of encoder layers.")
 tf.app.flags.DEFINE_integer("tweet_size", 32, "The length of a tweet (example).")
-tf.app.flags.DEFINE_integer("output_size", 2, "The output size, aka number of classes.")
+tf.app.flags.DEFINE_integer("output_size", 3, "The output size, aka number of classes.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary. (default 100)")
 tf.app.flags.DEFINE_integer("hatebase_size", 7, "Number of hatebase features. (default 8)")
 tf.app.flags.DEFINE_string("data_dir", "data/twitter_davidson", "SQuAD directory (default ./data/twitter_davidson)")
-tf.app.flags.DEFINE_string("train_dir", "train", "Training directory (default: ./train).")
+tf.app.flags.DEFINE_string("train_dir", "train", "CHECKPOINT directory (default: ./train).")
 tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (default: ./log)")
 tf.app.flags.DEFINE_integer("print_every", 100, "How many iterations to do per print.")
 tf.app.flags.DEFINE_integer("save_every", 1200, "How many iterations to do per save checkpoint and evaluate.")
@@ -45,12 +45,14 @@ tf.app.flags.DEFINE_string("vocab_path", "data/twitter_davidson/vocab.dat", "Pat
 tf.app.flags.DEFINE_string("vocab_stemmed", False, "Whether to use stemmed vocabulary (False for GloVe, True for others)")
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the GLoVe embedding (default: ./data/twitter_davidson/embeddings.{embedding_size}d.dat)")
 tf.app.flags.DEFINE_string("embed_trainable", False, "Whether to train embeddings (False for GloVe, True for others)")
+tf.app.flags.DEFINE_string("test_path", "", "Path to file with sentences to test (Default empty is REPL)")
 
 def initialize_model(session, model, train_dir, seed=42):
     tf.set_random_seed(seed)
     np.random.seed(seed)
 
     ckpt = tf.train.get_checkpoint_state(train_dir)
+    print ckpt
     v2_path = ckpt.model_checkpoint_path + ".index" if ckpt else ""
     logging.info(str(vars(FLAGS)))
     if ckpt and (tf.gfile.Exists(ckpt.model_checkpoint_path) or tf.gfile.Exists(v2_path)):
@@ -76,12 +78,6 @@ def initialize_vocab(vocab_path):
     else:
         raise ValueError("Vocabulary file %s not found.", vocab_path)
 
-# def load_dataset(x_file, y_file):
-#     with open(x_file, 'rb') as x_file, open(y_file, 'rb') as y_file:
-#         data_x = pd.read_csv( x_file, header = None, quoting = 0, dtype = np.float64 )
-#         data_y = pd.read_csv( y_file, header = 0, quoting = 0, usecols = ['hate_speech'], dtype = np.int32)
-#         return (data_x.values, data_y.values.ravel())
-
 def load_dataset(x_file, y_file):
     with open(x_file, 'rb') as x_file, open(y_file, 'rb') as y_file:
         data_x = np.loadtxt( x_file, delimiter = ' ', dtype = int)
@@ -92,12 +88,15 @@ def load_dataset(x_file, y_file):
             data_y = pd.read_csv( y_file, header = 0, quoting = 0, usecols = ['class'], dtype = int)
         data_y = data_y.values.ravel()
 
-        # for i in range(len(data_x)/batch_size):
-        #     start = batch_size*i
-        #     end = batch_size*(i+1)
-        #     dataset.append((data_x[start:end], data_y[start:end]))
-        
         return data_x, data_y
+
+def raw_to_ids(lines, vocab, tok):
+    lines = [clean(l) for l in lines]
+    ids = [sentence_to_token_ids(l, vocab, tokenizer=tok, pad=True) for l in lines]
+    # if FLAGS.model_type == 'hb_append':
+    #     hb = hatebase_features( lines, tokenizer=tok )
+    #     ids.extend(hb)
+    return ids
 
 def main(_):
     if FLAGS.embed_path:
@@ -127,17 +126,24 @@ def main(_):
 
     vocab, rev_vocab = initialize_vocab(FLAGS.vocab_path) # one is list and one is dict
     FLAGS.vocab_len = len(vocab)
+    tok = stem_tokenizer if FLAGS.vocab_stemmed else basic_tokenizer
 
-    #lr = SoftmaxClassifier(max_iter=FLAGS.epochs)
-    #lr = LRClassifierL2(C=100)
-    # train_and_eval_auc( train_x, train_y, test_x, test_y, model=lr )
     hs = HateSpeechSystem( FLAGS, train_x, train_y )
 
     with tf.Session() as sess:
         initialize_model(sess, hs, FLAGS.train_dir)
-        hs.train(sess, train_x, train_y, test_x, test_y)
-        # get predictions
-        # write predictions
+        if not FLAGS.test_path:
+            while True:
+                token_ids = raw_to_ids([raw_input("Type sentence: ")], vocab, tok)
+                print "Tokens:", token_ids
+                proba = hs.eval.predict_proba(sess, token_ids)[0][0]
+                print "Probability dist:", proba
+                print "Prediction:", np.argmax(proba)
+        raw_lines = pd.read_csv( FLAGS.test_path, header = 0, quoting = 0 )['tweet']
+        token_ids = raw_to_ids(raw_lines, vocab, tok)
+        pred, encod = hs.eval.predict(sess, token_ids, get_encoding=True)
+        pd.DataFrame(pred).to_csv( FLAGS.test_path.split('.')[0] + '.pred.csv')
+        pd.DataFrame(encod).to_csv( FLAGS.test_path.split('.')[0] + '.encod.csv')
 
 if __name__ == "__main__":
   tf.app.run()

@@ -7,8 +7,9 @@ import os
 import pandas as pd
 import numpy as np
 
+# HATEBASE = os.path.join(os.path.dirname(__file__), '../data/hatebase/lexicon.stemmed.csv')
 HATEBASE = os.path.join(os.path.dirname(__file__), '../data/hatebase/lexicon.csv')
-HATEBASE_NUM_FIELDS = 8
+HATEBASE_NUM_FIELDS = 7
 HATEBASE_FIELDS = {
     'about_class': np.int32, 
     'about_religion': np.int32, 
@@ -32,16 +33,16 @@ def train_and_eval_auc( train_x, train_y, test_x, test_y, model=LR() ):
     print "AUC:", auc
 
 # Returns matrix of shape (n_examples, n_features)
-def hatebase_features( raw_x, sparse=False ):
+def hatebase_features( raw_x, tokenizer=None, sparse=False ):
     with open(HATEBASE,'rb') as hb:
         hatebase_data = pd.read_csv( hb, header = 0, index_col = 0, quoting = 0, 
-                                    dtype = HATEBASE_FIELDS, usecols = range(9) )
+                                    dtype = HATEBASE_FIELDS, usecols = range(8) ) # dtype = HATEBASE_FIELDS, usecols = range(8) )
 
     def get_feature_vec( str ):
-        tokens = [w.rstrip(' ?:!,;.') for w in str.strip().split()]
+        tokens = tokenizer(str)
         # matches = [hatebase_data[w] for w in hatebase_data if w in tokens] # gets unique tokens
         matches = [w for w in tokens if w in hatebase_data.index]
-        feature_vec = hatebase_data.ix[matches].sum(axis=0).values
+        feature_vec = hatebase_data.ix[matches].sum(axis=0).values.astype(int)
         if sparse:
             return csr_matrix(feature_vec) 
         return feature_vec

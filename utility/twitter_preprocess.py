@@ -9,16 +9,17 @@ from sklearn.model_selection import train_test_split
 # TWITTER_USERNAME = r'(?<=^|(?<=[^a-zA-Z0-9-\.]))@([A-Za-z0-9_]+)'
 # TWITTER_URL = r'http:\/\/t\.co\/[A-Za-z0-9_]+'
 
-parser = argparse.ArgumentParser(description='Preprocess the data.')
-parser.add_argument('--twitter', dest='twitter', action='store_const',
-                   const=True, default=False,
-                   help='This is Twitter data')
-parser.add_argument('--rewrite', dest='rewrite', action='store_const',
-                   const=True, default=False,
-                   help='Clean and write data again')
-parser.add_argument('datafile', metavar='df', help='The data file to clean')
+def setup_args():
+  parser = argparse.ArgumentParser(description='Preprocess the data.')
+  parser.add_argument('--twitter', dest='twitter', action='store_const',
+                     const=True, default=False,
+                     help='This is Twitter data')
+  parser.add_argument('--rewrite', dest='rewrite', action='store_const',
+                     const=True, default=False,
+                     help='Clean and write data again')
+  parser.add_argument('datafile', metavar='df', help='The data file to clean')
 
-args = parser.parse_args()
+  return parser.parse_args()
 
 def split_hashtag(hashtag):
   hashtag_body = hashtag[1:]
@@ -28,13 +29,13 @@ def split_hashtag(hashtag):
     result = '<hashtag> ' + ' '.join(hashtag_body.split('(?=[A-Z])'))
   return result
 
-def clean(text):
+def clean(text, twitter=True):
   text = re.sub(r'&#8220;|&#8221;|"', '', text)
   text = re.sub(r'&#[0-9]{3,8};', ' <sym> ', text)
   text = re.sub(r'&gt;', '>', text)
   text = re.sub(r'&lt;', '<', text)
 
-  if args.twitter:
+  if twitter:
     # Different regex parts for smiley faces
     eyes = "[8:=;]"
     nose = "['`\-]?"
@@ -62,13 +63,13 @@ def clean(text):
 def binarize(count):
   return 1 if count > 0 else 0
 
-def read_write_dataset(write=False):
-  cleaned_data = args.datafile.split('.')[0] + '_cleaned.csv'
+def read_write_dataset(datafile, write=False, twitter=True):
+  cleaned_data = datafile.split('.')[0] + '_cleaned.csv'
 
   if write:
-    with open(args.datafile,'rb') as data_file:
+    with open(datafile,'rb') as data_file:
       data = pd.read_csv( data_file, header = 0, index_col = 0, quoting = 0 )
-      data['tweet'] = data.apply(lambda row: clean(row['tweet']), axis=1)
+      data['tweet'] = data.apply(lambda row: clean(row['tweet'], twitter), axis=1)
       data['hate_speech'] = data.apply(lambda row: binarize(row['hate_speech']), axis=1)
       data['offensive_language'] = data.apply(lambda row: binarize(row['offensive_language']), axis=1)
       data['neither'] = data.apply(lambda row: binarize(row['neither']), axis=1)
@@ -84,7 +85,7 @@ def read_write_dataset(write=False):
   return data
 
 def save_files(prefix, tier, indices, data):
-  tier_data = data.ix[indices]
+  tier_data = data.ix[indices] if indices else data
 
   with open(os.path.join(prefix, tier + '.x'), 'wb') as x_file:
     tier_data.to_csv( x_file, header = True, quoting = 0, columns=['tweet'] )
@@ -98,9 +99,11 @@ def split_tier(data_prefix, data, train_percentage = 0.8, shuffle=False):
   save_files(data_prefix, 'test', test_i, data)
 
 if __name__ == '__main__':
-  data = read_write_dataset(args.rewrite)
+  args = setup_args()
+  data = read_write_dataset(args.rewrite, args.datafile, args.twitter)
 
   print("Splitting the dataset into train and validation")
   data_prefix = os.path.join("data", "twitter_davidson")
-  split_tier(data_prefix, data, 0.8)
+  # split_tier(data_prefix, data, 0.8)
+  save_files(data_prefix, 'all', None, data)
 

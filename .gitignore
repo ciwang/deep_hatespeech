@@ -1,9 +1,12 @@
 *.pyc
 *.DS_Store
 *.txt
+figures/
 data/
 log/
 sftp-config.json
 .ipynb_checkpoints/
 train/
+test/
 mittens/
+extra_logs/
